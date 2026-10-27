@@ -1,0 +1,34 @@
+# Секреты и локальные настройки
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+
+# Исходные и личные данные — только локально
+data/*
+!data/.gitkeep
+*.ogg
+*.oga
+*.mp3
+*.wav
+*.m4a
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Выгрузки, отчёты прогонов, логи
+*.log
+evals/runs/
+
+# Редакторы и ОС
+.vscode/
+.idea/
+.cursor/
+.DS_Store
+Thumbs.db

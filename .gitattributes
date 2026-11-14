@@ -1,0 +1,12 @@
+# Текстовые файлы храним и выкладываем с переводом строки LF на любой ОС.
+# Без этого Git на Windows (core.autocrlf = true) переводит их в CRLF при checkout,
+# и bash-скрипты на Linux (Amvera, Docker) падают с ошибкой «$'\r': command not found».
+* text=auto eol=lf
+
+# Двоичные файлы не трогаем
+*.xlsx binary
+*.docx binary
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.zip  binary

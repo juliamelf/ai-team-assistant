@@ -1,0 +1,61 @@
+{
+  "name": "Очистка аудио встреч (3 месяца)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 3,
+              "triggerAtMinute": 17
+            }
+          ]
+        }
+      },
+      "id": "3f91f3da-1f7f-48bf-9044-04d775dd2a44",
+      "name": "Каждый день в 03:17",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT app.purge_audio() AS deleted, now() AS run_at;",
+        "options": {}
+      },
+      "id": "a31e5d22-d4d9-4979-b5f2-480d0670375f",
+      "name": "Удалить аудио старше 3 месяцев",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        300
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Каждый день в 03:17": {
+      "main": [
+        [
+          {
+            "node": "Удалить аудио старше 3 месяцев",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Moscow"
+  },
+  "tags": []
+}

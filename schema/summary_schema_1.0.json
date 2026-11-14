@@ -1,0 +1,672 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "summary_schema_1.0.json",
+ "title": "Выжимка встречи 1:1, схема 1.0",
+ "description": "Контракт между GigaChat и хранилищем ИИ-ассистента руководителя. Утверждена 13.11.2026. Модель возвращает весь документ, кроме четырёх полей блока meeting (meeting_date, manager_id, message_id, prompt_version): их дописывает n8n перед проверкой. Принадлежность ID справочникам (сотрудники, навыки) проверяет app.save_summary, а не эта схема. Обновления ранее поставленных задач (статус, перенос срока) — в task_updates (добавлено 14.11.2026).",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "schema_version",
+  "meeting",
+  "tasks",
+  "task_updates",
+  "skills",
+  "observations",
+  "signals",
+  "unresolved"
+ ],
+ "properties": {
+  "schema_version": {
+   "const": "1.0"
+  },
+  "meeting": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "employee_id",
+    "manager_id",
+    "meeting_date",
+    "message_id",
+    "prompt_version"
+   ],
+   "properties": {
+    "employee_id": {
+     "description": "С кем встреча. Единственное поле блока, которое заполняет модель. null — модель не смогла определить сотрудника.",
+     "anyOf": [
+      {
+       "$ref": "#/$defs/employee_id"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "manager_id": {
+     "$ref": "#/$defs/manager_id",
+     "description": "Заполняет n8n по дате встречи."
+    },
+    "meeting_date": {
+     "$ref": "#/$defs/iso_date",
+     "description": "Заполняет n8n."
+    },
+    "message_id": {
+     "type": "integer",
+     "description": "Заполняет n8n: ID сообщения Telegram."
+    },
+    "prompt_version": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Заполняет n8n, например v4."
+    }
+   }
+  },
+  "tasks": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/task"
+   }
+  },
+  "task_updates": {
+   "description": "Что изменилось по задачам, поставленным на прошлых встречах (список открытых задач — в контексте). Новые задачи сюда не пишутся — только в tasks.",
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/task_update"
+   }
+  },
+  "skills": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/skill"
+   }
+  },
+  "observations": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/observation"
+   }
+  },
+  "signals": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/signal"
+   }
+  },
+  "unresolved": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "unknown_names",
+    "ambiguous_dates"
+   ],
+   "properties": {
+    "unknown_names": {
+     "description": "Имена, которых нет в составе команды (HR, аналитик, смежная команда).",
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1
+     }
+    },
+    "ambiguous_dates": {
+     "description": "Слова о сроке, которые не удалось однозначно привязать к дате из списка.",
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1
+     }
+    }
+   }
+  }
+ },
+ "$defs": {
+  "iso_date": {
+   "type": "string",
+   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+  },
+  "employee_id": {
+   "type": "string",
+   "pattern": "^E\\d{2}$"
+  },
+  "manager_id": {
+   "type": "string",
+   "pattern": "^M\\d{2}$"
+  },
+  "person_id": {
+   "type": "string",
+   "pattern": "^[EM]\\d{2}$"
+  },
+  "evidence": {
+   "description": "Дословный фрагмент транскрипта, на котором основан пункт.",
+   "type": "string",
+   "minLength": 1
+  },
+  "task": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "owner_ids",
+    "what",
+    "due",
+    "evidence"
+   ],
+   "properties": {
+    "kind": {
+     "description": "task — разовое действие; agreement — долгосрочная договорённость («каждую неделю», «если застряла — пишет»).",
+     "enum": [
+      "task",
+      "agreement"
+     ]
+    },
+    "owner_ids": {
+     "description": "Исполнители: сотрудники и руководитель. Пустой массив — исполнитель не назван. Для договорённости на двоих (менторинг) — оба участника.",
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/person_id"
+     },
+     "uniqueItems": true
+    },
+    "what": {
+     "type": "string",
+     "minLength": 1
+    },
+    "due": {
+     "$ref": "#/$defs/due"
+    },
+    "evidence": {
+     "$ref": "#/$defs/evidence"
+    }
+   }
+  },
+  "task_ref": {
+   "description": "ID открытой задачи из контекста (T + номер).",
+   "type": "string",
+   "pattern": "^T[0-9]+$"
+  },
+  "task_update": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "task_id",
+    "what",
+    "status",
+    "due",
+    "evidence"
+   ],
+   "properties": {
+    "task_id": {
+     "description": "ID задачи из списка открытых задач. null — подходящей задачи в списке нет или нельзя выбрать одну: руководитель привяжет вручную.",
+     "anyOf": [
+      {
+       "$ref": "#/$defs/task_ref"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "what": {
+     "description": "Какая задача — коротко, своими словами («Профиль нагрузки к релизу 5.0»).",
+     "type": "string",
+     "minLength": 1
+    },
+    "status": {
+     "description": "in_progress — начата, в работе; done — выполнена; cancelled — отменена, решили не делать; rescheduled — перенесён или назначен срок.",
+     "enum": [
+      "in_progress",
+      "done",
+      "cancelled",
+      "rescheduled"
+     ]
+    },
+    "due": {
+     "description": "Новый срок — только для rescheduled, иначе null.",
+     "anyOf": [
+      {
+       "$ref": "#/$defs/due"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "evidence": {
+     "$ref": "#/$defs/evidence"
+    }
+   },
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "status": {
+        "const": "rescheduled"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "due": {
+        "$ref": "#/$defs/due"
+       }
+      }
+     },
+     "else": {
+      "properties": {
+       "due": {
+        "type": "null"
+       }
+      }
+     }
+    }
+   ]
+  },
+  "due": {
+   "description": "Срок. Просрочка считается по value для date и по value_to для range; остальные типы не просрочиваются.",
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "type",
+    "value",
+    "value_to",
+    "said"
+   ],
+   "properties": {
+    "type": {
+     "enum": [
+      "date",
+      "range",
+      "from",
+      "event",
+      "recurring",
+      "none"
+     ]
+    },
+    "value": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/iso_date"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "value_to": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/iso_date"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "said": {
+     "description": "Слова руководителя о сроке или периодичности («до пятницы», «раз в неделю по часу»). null — о сроке ничего не сказано.",
+     "type": [
+      "string",
+      "null"
+     ]
+    }
+   },
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "date"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "value": {
+        "$ref": "#/$defs/iso_date"
+       },
+       "value_to": {
+        "type": "null"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "range"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "value": {
+        "$ref": "#/$defs/iso_date"
+       },
+       "value_to": {
+        "$ref": "#/$defs/iso_date"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "from"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "value": {
+        "$ref": "#/$defs/iso_date"
+       },
+       "value_to": {
+        "type": "null"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "enum": [
+         "event",
+         "none"
+        ]
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "value": {
+        "type": "null"
+       },
+       "value_to": {
+        "type": "null"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "enum": [
+         "event",
+         "recurring"
+        ]
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "said": {
+        "type": "string",
+        "minLength": 1
+       }
+      }
+     }
+    }
+   ]
+  },
+  "direction": {
+   "description": "same — текущий уровень без изменения; up — улучшение; down — ухудшение. up и down ставятся только при словах об изменении.",
+   "enum": [
+    "up",
+    "down",
+    "same"
+   ]
+  },
+  "assessment": {
+   "description": "Только при direction = same: strong — уровень оценён как сильный, weak — как слабый, null — оценки нет.",
+   "enum": [
+    "strong",
+    "weak",
+    null
+   ]
+  },
+  "assessment_only_with_same": {
+   "if": {
+    "properties": {
+     "direction": {
+      "const": "same"
+     }
+    },
+    "required": [
+     "direction"
+    ]
+   },
+   "else": {
+    "properties": {
+     "assessment": {
+      "type": "null"
+     }
+    }
+   }
+  },
+  "skill": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "employee_id",
+    "skill_id",
+    "direction",
+    "evidence"
+   ],
+   "properties": {
+    "employee_id": {
+     "$ref": "#/$defs/employee_id"
+    },
+    "skill_id": {
+     "description": "ID темы из словаря тем (topics.csv). Тему в компетенцию матрицы переводит база по треку сотрудника; тема без компетенции в этом треке сохраняется как наблюдение.",
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "direction": {
+     "$ref": "#/$defs/direction"
+    },
+    "assessment": {
+     "$ref": "#/$defs/assessment"
+    },
+    "evidence": {
+     "$ref": "#/$defs/evidence"
+    }
+   },
+   "allOf": [
+    {
+     "$ref": "#/$defs/assessment_only_with_same"
+    }
+   ]
+  },
+  "observation": {
+   "description": "То, что не входит в матрицу: SQL, баг-репорты, оценка трудозатрат, архитектура фреймворка и т. п.",
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "employee_id",
+    "text",
+    "direction",
+    "evidence"
+   ],
+   "properties": {
+    "employee_id": {
+     "$ref": "#/$defs/employee_id"
+    },
+    "text": {
+     "type": "string",
+     "minLength": 1
+    },
+    "direction": {
+     "description": "Как у навыков; null — наблюдение без оценки («перешёл на новый проект»).",
+     "enum": [
+      "up",
+      "down",
+      "same",
+      null
+     ]
+    },
+    "assessment": {
+     "$ref": "#/$defs/assessment"
+    },
+    "evidence": {
+     "$ref": "#/$defs/evidence"
+    }
+   },
+   "allOf": [
+    {
+     "$ref": "#/$defs/assessment_only_with_same"
+    }
+   ]
+  },
+  "signal": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "type",
+    "tone",
+    "text",
+    "evidence"
+   ],
+   "properties": {
+    "type": {
+     "enum": [
+      "attrition_risk",
+      "burnout",
+      "motivation",
+      "goal",
+      "conflict",
+      "mood",
+      "probation",
+      "achievement",
+      "other"
+     ]
+    },
+    "tone": {
+     "description": "risk — повод для внимания руководителя; positive — хорошая новость; neutral — факт без оценки (например, отказ от необязательного теста).",
+     "enum": [
+      "risk",
+      "positive",
+      "neutral"
+     ]
+    },
+    "text": {
+     "type": "string",
+     "minLength": 1
+    },
+    "evidence": {
+     "$ref": "#/$defs/evidence"
+    }
+   }
+  }
+ },
+ "examples": [
+  {
+   "schema_version": "1.0",
+   "meeting": {
+    "employee_id": "E02",
+    "manager_id": "M01",
+    "meeting_date": "2026-09-15",
+    "message_id": 1002,
+    "prompt_version": "v4"
+   },
+   "tasks": [
+    {
+     "kind": "task",
+     "owner_ids": [
+      "E02"
+     ],
+     "what": "Подготовить профиль нагрузки к релизу ЗаказПро 5.0",
+     "due": {
+      "type": "date",
+      "value": "2026-09-25",
+      "value_to": null,
+      "said": "до двадцать пятого сентября"
+     },
+     "evidence": "Павел готовит профиль нагрузки до двадцать пятого сентября"
+    },
+    {
+     "kind": "task",
+     "owner_ids": [
+      "E02"
+     ],
+     "what": "Написать инструкцию по нагрузочному стенду",
+     "due": {
+      "type": "none",
+      "value": null,
+      "value_to": null,
+      "said": "срок пока не поставили"
+     },
+     "evidence": "Договорились, что он запишет инструкцию, но срок пока не поставили"
+    },
+    {
+     "kind": "agreement",
+     "owner_ids": [
+      "E02",
+      "E01"
+     ],
+     "what": "Менторинг по часу",
+     "due": {
+      "type": "recurring",
+      "value": null,
+      "value_to": null,
+      "said": "раз в неделю по часу"
+     },
+     "evidence": "раз в неделю по часу будет менторить"
+    }
+   ],
+   "task_updates": [
+    {
+     "task_id": "T7",
+     "what": "Снять с Павла дежурство по продуктиву на октябрь",
+     "status": "done",
+     "due": null,
+     "evidence": "Дежурство с него сняли"
+    },
+    {
+     "task_id": "T8",
+     "what": "Инструкция по нагрузочному стенду",
+     "status": "rescheduled",
+     "due": {
+      "type": "date",
+      "value": "2026-10-16",
+      "value_to": null,
+      "said": "до шестнадцатого октября"
+     },
+     "evidence": "Инструкцию по нагрузочному стенду Павел напишет до шестнадцатого октября"
+    }
+   ],
+   "skills": [
+    {
+     "employee_id": "E02",
+     "skill_id": "load_testing",
+     "direction": "same",
+     "assessment": "strong",
+     "evidence": "Экспертиза по нагрузке очень сильная"
+    }
+   ],
+   "observations": [
+    {
+     "employee_id": "E02",
+     "text": "Сильная экспертиза в архитектуре автотестов",
+     "direction": "same",
+     "assessment": "strong",
+     "evidence": "и архитектуре автотестов у него очень сильная"
+    }
+   ],
+   "signals": [
+    {
+     "type": "attrition_risk",
+     "tone": "risk",
+     "text": "Пишут рекрутеры, задумывается",
+     "evidence": "ему постоянно пишут рекрутеры"
+    }
+   ],
+   "unresolved": {
+    "unknown_names": [],
+    "ambiguous_dates": []
+   }
+  }
+ ]
+}

@@ -210,7 +210,7 @@ def main(raw_dir: str, clean_dir: str, manifest_path: str) -> None:
         })
         print(f"{out.name}: ОТФ {len(data['otfs'])}, ТФ {tf_count}, {len(md)} символов")
     with open(manifest_path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()), lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 

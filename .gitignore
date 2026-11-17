@@ -9,11 +9,9 @@ credentials*.json
 # Исходные и личные данные — только локально
 data/*
 !data/.gitkeep
-*.ogg
-*.oga
-*.mp3
-*.wav
-*.m4a
+!data/README.md
+!data/manifest.csv
+!data/clean/
 
 # Python
 __pycache__/

@@ -16,6 +16,7 @@ from src.rag.chunking import (
     Chunk,
     CorpusFormatError,
     EMBEDDING_MODEL,
+    parse_front_matter,
     split_document,
 )
 from src.rag.embeddings import EmbeddingError, embed_with_retry, make_embedder
@@ -88,6 +89,7 @@ def index_corpus(
     docs_ok = 0
     docs_failed = 0
     errors: list[str] = []
+    stopped = False
 
     for md_file in md_files:
         filename = md_file.name
@@ -104,8 +106,6 @@ def index_corpus(
 
         # Проверяем doc_id из метаданных против имени файла
         try:
-            from src.rag.chunking import parse_front_matter
-
             meta = parse_front_matter(text)
             meta_doc_id = str(meta.get("doc_id", ""))
         except CorpusFormatError:
@@ -125,7 +125,6 @@ def index_corpus(
         try:
             chunks = split_document(
                 text,
-                filename=filename,
                 embedding_model=EMBEDDING_MODEL,
             )
         except CorpusFormatError as exc:
@@ -189,7 +188,6 @@ def index_corpus(
         total_new_changed = len(embed_texts)
         batch_idx = 0
         embedding_errors: list[str] = []
-        stopped = False
 
         while batch_idx * batch_size < total_new_changed:
             batch_texts = embed_texts[
@@ -205,18 +203,17 @@ def index_corpus(
                 )
             except EmbeddingError as exc:
                 if not exc.retryable:
-                    errors.append(
-                        f"{filename}: ошибка эмбеддинга: {exc}"
-                    )
-                    docs_failed += 1
-                    stopped = True
-                    # Добавляем все необработанные документы в docs_failed
                     remaining = [
                         f.name
                         for f in md_files[
                             md_files.index(md_file) + 1 :
                         ]
                     ]
+                    errors.append(
+                        f"{filename}: ошибка эмбеддинга: {exc}"
+                    )
+                    docs_failed += 1 + len(remaining)
+                    stopped = True
                     if remaining:
                         errors.append(
                             f"остановлено: не обработаны {', '.join(remaining)}"

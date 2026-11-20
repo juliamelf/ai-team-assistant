@@ -1,2 +1,2 @@
 date,task,spec_version,spec_questions,tests_total,tests_failed_first_run,passed_first_run,rework_rounds,defects_review,defects_tests_only,defects_human,min_spec,min_code,min_review,min_tests,min_rework,tokens_claude,models,accepted,notes
-,?????? ?????????? ??????? ,3,12,35,8,no,,,,,66,48,11,23,,,???????????? ? ????? - Claude; ??? - GigaCode; ????? - DeepSeek ,,
+,Скрипт индексации корпуса,3,12,35,8,no,,,,,66,48,11,23,,,спецификация и ревью — Claude; код — GigaCode; тесты — DeepSeek,,

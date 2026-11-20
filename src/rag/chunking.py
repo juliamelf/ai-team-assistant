@@ -114,6 +114,9 @@ def parse_front_matter(text: str) -> dict[str, Any]:
         if key == "tf_codes":
             tf_codes_raw = value
         else:
+            # Убираем кавычки вокруг значения YAML (AC-2)
+            if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+                value = value[1:-1]
             fields[key] = value
 
     # tf_codes — список строк
@@ -186,8 +189,6 @@ def _build_chunk_text(
 def split_document(
     text: str,
     embedding_model: str = EMBEDDING_MODEL,
-    *,
-    filename: str | None = None,
 ) -> list[Chunk]:
     """Разрезает текст документа на фрагменты.
 
@@ -242,7 +243,7 @@ def split_document(
     # --- doc фрагмент ---
     # doc: текст от H1 до первого ##; если H1 нет — ошибка
     if headings[0][0] != 1:
-        label = filename if filename else doc_id
+        label = doc_id
         raise CorpusFormatError(f"{label}: нет заголовка # до первого ##")
 
     doc_raw = body[: headings[first_h2_idx][3]].rstrip("\n")
@@ -302,7 +303,7 @@ def split_document(
         otf_code_m = _RE_OTF_CODE.search(otf_heading_text)
         otf_code = otf_code_m.group(1) if otf_code_m else None
         if otf_code is None:
-            label = filename if filename else doc_id
+            label = doc_id
             raise CorpusFormatError(
                 f"{label}: заголовок ## без кода ОТФ: {otf_heading_text}"
             )
@@ -321,27 +322,30 @@ def split_document(
             )
             otf_body_end = next_h2[3] if next_h2 else len(body)
 
-        otf_text = body[otf_body_start:otf_body_end].rstrip("\n")
+        otf_raw = body[otf_body_start:otf_body_end]
 
-        if len(otf_text) > MAX_CHUNK_CHARS:
-            errors.append(f"{otf_chunk_id}: длина {len(otf_text)} > {MAX_CHUNK_CHARS}")
-        else:
-            otf_content_h = content_hash(otf_text, embedding_model)
-            chunks.append(Chunk(
-                chunk_id=otf_chunk_id,
-                doc_id=doc_id,
-                ps_code=ps_code,
-                doc_type=doc_type,
-                doc_role=doc_role,
-                doc_version=doc_version,
-                chunk_type="otf",
-                otf_code=otf_code,
-                tf_code=None,
-                qualification_level=otf_level,
-                heading=otf_heading_text,
-                text=otf_text,
-                content_hash=otf_content_h,
-            ))
+        if len(otf_raw) > MAX_CHUNK_CHARS:
+            raise CorpusFormatError(
+                f"{otf_chunk_id}: длина {len(otf_raw)} > {MAX_CHUNK_CHARS}"
+            )
+
+        otf_text = _build_chunk_text("otf", otf_raw, ps_code, title)
+        otf_content_h = content_hash(otf_text, embedding_model)
+        chunks.append(Chunk(
+            chunk_id=otf_chunk_id,
+            doc_id=doc_id,
+            ps_code=ps_code,
+            doc_type=doc_type,
+            doc_role=doc_role,
+            doc_version=doc_version,
+            chunk_type="otf",
+            otf_code=otf_code,
+            tf_code=None,
+            qualification_level=otf_level,
+            heading=otf_heading_text,
+            text=otf_text,
+            content_hash=otf_content_h,
+        ))
 
         # --- TF фрагменты ---
         for idx, h3 in enumerate(h3s):
@@ -366,7 +370,7 @@ def split_document(
             tf_raw = body[tf_body_start:tf_body_end].rstrip("\n")
 
             if tf_code_full_str is None:
-                label = filename if filename else doc_id
+                label = doc_id
                 raise CorpusFormatError(
                     f"{label}: заголовок ### без кода ТФ: {h3_heading_text}"
                 )
@@ -405,7 +409,7 @@ def split_document(
 
     # --- Проверки валидации ---
     if collected_tf_codes != tf_codes_meta:
-        label = filename if filename else doc_id
+        label = doc_id
         raise CorpusFormatError(
             f"{label}: коды ТФ из заголовков {collected_tf_codes} "
             f"не совпадают с tf_codes {tf_codes_meta}"

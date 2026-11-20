@@ -280,7 +280,9 @@ def test_ac7_repeat_run_without_changes_makes_no_calls(tmp_path: Path):
 def test_ac8_changed_tf_is_reembedded_and_updated(tmp_path: Path):
     # подготовка
     corpus_v1 = make_corpus(tmp_path / "v1", BASE_DOC)
-    corpus_v2 = make_corpus(tmp_path / "v2", CHANGED_DOC)
+    corpus_v2 = tmp_path / "v2" / "corpus"
+    corpus_v2.mkdir(parents=True)
+    shutil.copyfile(CHANGED_DOC, corpus_v2 / BASE_DOC.name)
     store = FakeStore()
     first = index_corpus(corpus_v1, FakeEmbed(), store)
     assert first.inserted == 6
@@ -308,7 +310,9 @@ def test_ac8_changed_tf_is_reembedded_and_updated(tmp_path: Path):
 def test_ac9_removed_tf_is_deleted(tmp_path: Path):
     # подготовка
     corpus_v1 = make_corpus(tmp_path / "v1", BASE_DOC)
-    corpus_v2 = make_corpus(tmp_path / "v2", WITHOUT_TF_DOC)
+    corpus_v2 = tmp_path / "v2" / "corpus"
+    corpus_v2.mkdir(parents=True)
+    shutil.copyfile(WITHOUT_TF_DOC, corpus_v2 / BASE_DOC.name)
     store = FakeStore()
     first = index_corpus(corpus_v1, FakeEmbed(), store)
     assert first.inserted == 6

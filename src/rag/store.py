@@ -72,13 +72,20 @@ class PgChunkStore:
         )
     """
 
-    def __init__(self, conn: psycopg.Connection) -> None:
+    def __init__(
+        self,
+        conn: psycopg.Connection,
+        *,
+        embedding_model: str = "ai-sage/Giga-Embeddings-instruct-3B",
+    ) -> None:
         self._conn = conn
+        self._embedding_model = embedding_model
 
-    def _ensure_table(self) -> None:
+    @staticmethod
+    def ensure_table(conn: psycopg.Connection) -> None:
         """Проверяет, что таблица rag.chunks существует."""
-        with self._conn.cursor() as cur:
-            cur.execute(self._CHECK_TABLE_SQL)
+        with conn.cursor() as cur:
+            cur.execute(PgChunkStore._CHECK_TABLE_SQL)
             exists = cur.fetchone()[0]
         if not exists:
             raise psycopg.ProgrammingError(
@@ -98,12 +105,10 @@ class PgChunkStore:
         upserts: list[tuple[Chunk, list[float]]],
         delete_ids: list[str],
     ) -> None:
-        self._ensure_table()
-
-        with self._conn.cursor() as cur:
+        with self._conn.transaction():
             # Вставляем / обновляем
             for chunk, embedding in upserts:
-                cur.execute(self._UPSERT_SQL, (
+                self._conn.execute(self._UPSERT_SQL, (
                     chunk.chunk_id,
                     chunk.doc_id,
                     chunk.ps_code,
@@ -117,14 +122,10 @@ class PgChunkStore:
                     chunk.heading,
                     chunk.text,
                     chunk.content_hash,
-                    "ai-sage/Giga-Embeddings-instruct-3B",
+                    self._embedding_model,
                     embedding,
                 ))
 
             # Удаляем лишние
             for chunk_id in delete_ids:
-                cur.execute(self._DELETE_SQL, (chunk_id,))
-
-        # Если дошли сюда — транзакция коммитится автоматически
-        # (psycopg 3 auto-commit off по умолчанию, но connection.commit() вызывается
-        #  при выходе из контекста, если не было исключения)
+                self._conn.execute(self._DELETE_SQL, (chunk_id,))

@@ -30,3 +30,5 @@ evals/runs/
 .cursor/
 .DS_Store
 Thumbs.db
+# LibreOffice lock files
+.~lock.*

@@ -7,8 +7,6 @@ import time
 from functools import wraps
 from typing import Any, Callable
 
-from dotenv import load_dotenv
-
 from openai import (
     APIConnectionError,
     APITimeoutError,
@@ -19,8 +17,6 @@ from openai import (
 )
 
 from src.rag.chunking import EMBEDDING_MODEL
-
-load_dotenv()
 
 
 class EmbeddingError(Exception):
@@ -41,7 +37,6 @@ def _is_retryable_error(exc: Exception) -> bool:
         return True
     if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
         return False
-    # Ошибки с кодом 4xx — не повторяем, всё остальное — повторяем
     code = getattr(exc, "status_code", None)
     if code is not None:
         return not (400 <= code < 500)
@@ -80,7 +75,6 @@ def _do_embed(
     response = client.embeddings.create(
         model=model,
         input=texts,
-        dimensions=2048,
     )
     # Сортируем по index, чтобы порядок совпадал с input
     items = sorted(response.data, key=lambda x: x.index)
@@ -98,7 +92,10 @@ def make_embedder(
     """
     api_key = os.environ.get("CLOUDRU_API_KEY", "").strip()
     if not api_key:
-        raise EmbeddingError("не задана переменная окружения CLOUDRU_API_KEY", retryable=False)
+        raise EmbeddingError(
+            "не задана переменная окружения CLOUDRU_API_KEY",
+            retryable=False,
+        )
 
     base_url = os.environ.get("CLOUDRU_FM_BASE_URL", "").strip()
     if not base_url:

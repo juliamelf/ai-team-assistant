@@ -12,7 +12,12 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
-from src.rag.chunking import Chunk, CorpusFormatError, split_document
+from src.rag.chunking import (
+    Chunk,
+    CorpusFormatError,
+    EMBEDDING_MODEL,
+    split_document,
+)
 from src.rag.embeddings import EmbeddingError, embed_with_retry, make_embedder
 from src.rag.store import ChunkStore, PgChunkStore
 
@@ -34,16 +39,6 @@ class IndexReport:
     deleted: int = 0
     errors: list[str] = field(default_factory=list)
     stopped: bool = False
-
-
-def _build_embedding_text(chunk: Chunk, ps_code: str, title: str) -> str:
-    """Формирует текст, который ушёл в эмбеддинг."""
-    if chunk.chunk_type == "doc":
-        return chunk.text.rstrip("\n")
-
-    # otf / tf: первая строка с названием профстандарта, пустая строка, текст фрагмента
-    prefix = f"Профстандарт {ps_code} \u00ab{title}\u00bb"
-    return f"{prefix}\n\n{chunk.text}".rstrip("\n")
 
 
 def index_corpus(
@@ -68,7 +63,6 @@ def index_corpus(
         return IndexReport(
             docs_total=0,
             errors=[f"{clean_dir}: нет *.md файлов"],
-            stopped=True,
         )
 
     # Фильтруем по doc_id если задан
@@ -82,7 +76,6 @@ def index_corpus(
             return IndexReport(
                 docs_total=1,
                 errors=[f"{doc_id}.md: не найден в {clean_dir}"],
-                stopped=True,
             )
         md_files = [target]
 
@@ -109,9 +102,32 @@ def index_corpus(
             docs_failed += 1
             continue
 
+        # Проверяем doc_id из метаданных против имени файла
+        try:
+            from src.rag.chunking import parse_front_matter
+
+            meta = parse_front_matter(text)
+            meta_doc_id = str(meta.get("doc_id", ""))
+        except CorpusFormatError:
+            # parse_front_matter уже выбросила нужную ошибку ниже
+            meta_doc_id = ""
+
+        if meta_doc_id and meta_doc_id != file_doc_id:
+            msg = (
+                f"{filename}: doc_id {meta_doc_id} "
+                f"не совпадает с именем файла"
+            )
+            errors.append(msg)
+            docs_failed += 1
+            continue
+
         # Разбираем и нарезаем
         try:
-            chunks = split_document(text)
+            chunks = split_document(
+                text,
+                filename=filename,
+                embedding_model=EMBEDDING_MODEL,
+            )
         except CorpusFormatError as exc:
             msg = f"{filename}: {exc}"
             errors.append(msg)
@@ -123,20 +139,6 @@ def index_corpus(
             errors.append(msg)
             docs_failed += 1
             continue
-
-        # Извлекаем метаданные из первого фрагмента (они одинаковы для всех)
-        first = chunks[0]
-        ps_code = first.ps_code
-        title = ""  # нужно извлечь из тела документа
-
-        # Извлекаем title из front matter — читаем снова
-        from src.rag.chunking import parse_front_matter
-        try:
-            meta = parse_front_matter(text)
-            title = str(meta.get("title", ""))
-        except CorpusFormatError:
-            # Уже было обработано выше
-            pass
 
         # --- dry_run ---
         if dry_run:
@@ -181,13 +183,13 @@ def index_corpus(
         embed_texts: list[str] = []
 
         for chunk in new_chunks + changed_chunks:
-            embed_text = _build_embedding_text(chunk, ps_code, title)
-            embed_texts.append(embed_text)
+            embed_texts.append(chunk.text)
 
         # Разбиваем на батчи
         total_new_changed = len(embed_texts)
         batch_idx = 0
         embedding_errors: list[str] = []
+        stopped = False
 
         while batch_idx * batch_size < total_new_changed:
             batch_texts = embed_texts[
@@ -202,10 +204,27 @@ def index_corpus(
                     embed, batch_texts, max_retries=3, sleep=sleep
                 )
             except EmbeddingError as exc:
+                if not exc.retryable:
+                    errors.append(
+                        f"{filename}: ошибка эмбеддинга: {exc}"
+                    )
+                    docs_failed += 1
+                    stopped = True
+                    # Добавляем все необработанные документы в docs_failed
+                    remaining = [
+                        f.name
+                        for f in md_files[
+                            md_files.index(md_file) + 1 :
+                        ]
+                    ]
+                    if remaining:
+                        errors.append(
+                            f"остановлено: не обработаны {', '.join(remaining)}"
+                        )
+                    break
                 embedding_errors.append(
                     f"{filename}: ошибка эмбеддинга: {exc}"
                 )
-                # Прерываем обработку этого документа
                 break
 
             # Проверяем векторы
@@ -230,6 +249,9 @@ def index_corpus(
                 continue
 
             break  # выходим из цикла if была ошибка проверки
+
+        if stopped:
+            break
 
         if embedding_errors:
             errors.extend(embedding_errors)
@@ -275,7 +297,7 @@ def index_corpus(
         unchanged=all_unchanged,
         deleted=all_deleted,
         errors=errors,
-        stopped=False,
+        stopped=stopped,
     )
 
     # Итоговая строка
@@ -344,6 +366,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ошибка: {args.clean_dir} — не директория", file=sys.stderr)
         return 2
 
+    # Проверяем *.md в папке
+    md_files = list(args.clean_dir.glob("*.md"))
+    if not md_files:
+        print(
+            f"ошибка: в {args.clean_dir} нет *.md файлов",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Проверяем --doc
+    if args.doc is not None:
+        target = args.clean_dir / f"{args.doc}.md"
+        if not target.exists():
+            print(
+                f"ошибка: файл {args.doc}.md не найден в {args.clean_dir}",
+                file=sys.stderr,
+            )
+            return 2
+
     # Проверяем окружение (если не dry_run)
     if not args.dry_run:
         env_errors = _check_env()
@@ -352,17 +393,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ошибка окружения: {e}", file=sys.stderr)
             return 2
 
-    # Определяем embed и store
-    embed: Callable[[list[str]], list[list[float]]] | None = None
-    store: ChunkStore | None = None
-
-    if not args.dry_run:
-        try:
-            embed = make_embedder()
-        except EmbeddingError as exc:
-            print(f"ошибка инициализации embed: {exc}", file=sys.stderr)
-            return 2
-
+        # Проверяем таблицу rag.chunks
         try:
             import psycopg
 
@@ -373,10 +404,29 @@ def main(argv: list[str] | None = None) -> int:
                 user=os.environ["POSTGRES_USER"],
                 password=os.environ["POSTGRES_PASSWORD"],
             )
-            store = PgChunkStore(conn)
+            try:
+                PgChunkStore.ensure_table(conn)
+            except Exception:
+                conn.close()
+                raise
         except Exception as exc:
             print(f"ошибка подключения к БД: {exc}", file=sys.stderr)
             return 2
+
+        # Определяем embed и store
+        try:
+            embed = make_embedder()
+        except EmbeddingError as exc:
+            print(f"ошибка инициализации embed: {exc}", file=sys.stderr)
+            return 2
+
+        store = PgChunkStore(
+            conn, embedding_model=EMBEDDING_MODEL
+        )
+    else:
+        embed: Callable[[list[str]], list[list[float]]] | None = None
+        store: ChunkStore | None = None
+        conn = None
 
     try:
         report = index_corpus(
@@ -387,9 +437,9 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
     finally:
-        if store is not None and store._conn is not None:
+        if conn is not None:
             try:
-                store._conn.close()
+                conn.close()
             except Exception:
                 pass
 

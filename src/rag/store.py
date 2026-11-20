@@ -79,6 +79,7 @@ class PgChunkStore:
         embedding_model: str = "ai-sage/Giga-Embeddings-instruct-3B",
     ) -> None:
         self._conn = conn
+        self._conn.autocommit = True
         self._embedding_model = embedding_model
 
     @staticmethod

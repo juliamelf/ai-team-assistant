@@ -736,25 +736,35 @@ def test_ac18_full_corpus_index_and_repeat_run_is_noop():
         assert report.errors == []
         assert report.chunks_total == 535
 
-        with conn.cursor() as cur:
-            cur.execute("SELECT count(*) FROM rag.chunks")
-            assert cur.fetchone()[0] == 535
+        check_conn = psycopg.connect(
+            host=os.environ["POSTGRES_HOST"],
+            port=os.environ.get("POSTGRES_PORT", "5432"),
+            dbname=os.environ["POSTGRES_DB"],
+            user=os.environ["POSTGRES_USER"],
+            password=os.environ["POSTGRES_PASSWORD"],
+        )
+        try:
+            with check_conn.cursor() as cur:
+                cur.execute("SELECT count(*) FROM rag.chunks")
+                assert cur.fetchone()[0] == 535
 
-            cur.execute(
-                "SELECT count(*) FROM rag.chunks WHERE vector_dims(embedding) <> 2048"
-            )
-            assert cur.fetchone()[0] == 0
+                cur.execute(
+                    "SELECT count(*) FROM rag.chunks WHERE vector_dims(embedding) <> 2048"
+                )
+                assert cur.fetchone()[0] == 0
 
-            cur.execute(
-                "SELECT chunk_type, count(*) FROM rag.chunks GROUP BY chunk_type"
-            )
-            assert dict(cur.fetchall()) == {"doc": 9, "otf": 35, "tf": 491}
+                cur.execute(
+                    "SELECT chunk_type, count(*) FROM rag.chunks GROUP BY chunk_type"
+                )
+                assert dict(cur.fetchall()) == {"doc": 9, "otf": 35, "tf": 491}
 
-            cur.execute(
-                "SELECT doc_role, count(DISTINCT doc_id) FROM rag.chunks "
-                "GROUP BY doc_role"
-            )
-            assert dict(cur.fetchall()) == {"source": 2, "distractor": 7}
+                cur.execute(
+                    "SELECT doc_role, count(DISTINCT doc_id) FROM rag.chunks "
+                    "GROUP BY doc_role"
+                )
+                assert dict(cur.fetchall()) == {"source": 2, "distractor": 7}
+        finally:
+            check_conn.close()
 
         calls: list[list[str]] = []
 

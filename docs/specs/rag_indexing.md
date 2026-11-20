@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Версия | 2 |
+| Версия | 3 |
 | Статус | утверждена 20.11.2026 |
 | Автор | Claude |
 | Утвердил | Юлия Короткова |
@@ -36,7 +36,7 @@
 | --- | --- | --- | --- | --- |
 | Папка корпуса | аргумент командной строки | путь к папке с `*.md` | `data/clean` | Папки нет или в ней нет `*.md` → сообщение об ошибке, код выхода 2, к API и базе не обращаемся |
 | Файл документа | `data/clean/<doc_id>.md` | UTF-8, блок YAML между `---` в начале, затем текст по контракту `data/README.md` | `data/clean/ps-06.004.md` | См. раздел 7: документ пропускается, ошибка в отчёте, остальные документы индексируются |
-| Обязательные поля метаданных | YAML документа | `doc_id`, `ps_code`, `title`, `doc_type`, `doc_role`, `version`, `tf_codes` | `doc_id: ps-06.004` | Поле отсутствует или пустое → документ пропускается |
+| Обязательные поля метаданных | YAML документа | `doc_id`, `ps_code`, `title`, `doc_type`, `doc_role`, `version`, `tf_codes` | `doc_id: ps-06.004` | Поле отсутствует или пустое → документ пропускается. Пустой список `tf_codes: []` считается пустым полем |
 | Фильтр документа | аргумент `--doc` (необязательный) | `doc_id` | `--doc ps-06.004` | Нет такого файла → ошибка, код выхода 2 |
 | Ключ cloud.ru | `.env`: `CLOUDRU_API_KEY` | строка (API-ключ сервисного аккаунта с доступом к Foundation Models) | | Не задан (и не `--dry-run`) → ошибка до начала работы, код выхода 2 |
 | Адрес API | `.env`: `CLOUDRU_FM_BASE_URL` (необязательный) | URL | `https://foundation-models.api.cloud.ru/v1` | Не задан → `https://foundation-models.api.cloud.ru/v1` |
@@ -102,9 +102,9 @@ ON CONFLICT (version) DO NOTHING;
 5. Проверить документ: коды ТФ из заголовков `###` в том же порядке совпадают с `tf_codes` из метаданных, повторов нет, ни один фрагмент не длиннее `MAX_CHUNK_CHARS = 12000` символов. При нарушении документ пропускается целиком (см. раздел 7).
 6. Собрать текст для эмбеддинга:
    - doc: текст фрагмента как есть, без пустых строк в конце;
-   - otf и tf: первая строка `Профстандарт <ps_code> «<title>»`, пустая строка, затем текст фрагмента вместе с его заголовком, без пустых строк в конце.
+   - otf и tf: первая строка `Профстандарт <ps_code> «<title>»`, пустая строка, затем текст фрагмента так, как он стоит в документе, начиная со строки заголовка вместе с маркером (`## …` или `### …`), без пустых строк в конце.
 7. Посчитать `content_hash` = sha256 (hex) от строки `<embedding_model>\n<текст для эмбеддинга>`.
-8. Если `--dry-run`, напечатать по документу число фрагментов по типам и перейти к следующему. К API и базе не обращаться.
+8. Если `--dry-run`, напечатать по документу число фрагментов по типам и перейти к следующему. К API и базе не обращаться. В отчёте `inserted`, `updated`, `unchanged`, `deleted` равны 0, `chunks_total` и счётчики документов заполняются.
 9. Получить из хранилища хэши уже записанных фрагментов этого `doc_id`. Разделить фрагменты на новые (нет `chunk_id`), изменённые (хэш другой) и без изменений (хэш совпадает). Фрагменты из базы, которых больше нет в документе, пометить к удалению.
 10. Эмбеддинги получить только для новых и изменённых фрагментов: пакетами по `BATCH_SIZE = 16` текстов, моделью `ai-sage/Giga-Embeddings-instruct-3B` (метод `embeddings.create` клиента `openai`), с таймаутом запроса 60 с. Проверить, что каждый вектор длиной 2048.
 11. Записать документ одной транзакцией: вставить новые, обновить изменённые (все поля, `indexed_at = now()`), удалить лишние. Если на шагах 10–11 произошла ошибка, по этому документу в базе ничего не меняется.
@@ -118,7 +118,7 @@ ON CONFLICT (version) DO NOTHING;
 - Секреты: только из `.env` через `python-dotenv`; в коде, отчёте, логах и текстах исключений их нет. Проверку SSL не отключать.
 - Объём: 9 документов, около 940 тыс. символов, 535 фрагментов. Самый длинный фрагмент около 5 тыс. символов, это укладывается в окно модели (8К токенов). Ожидаемый расход около 0,3 млн токенов, по цене 32,22 ₽ за 1 млн — около 10 ₽ за полную индексацию.
 - Лимиты API: запросы идут последовательно, без параллельности.
-- Повторы: при ошибке API (сеть, таймаут, 429, 5xx) до 3 попыток с паузами 2, 4, 8 с. Ошибки 401 и 403 не повторяются.
+- Повторы: при ошибке API (сеть, таймаут, 429, 5xx) всего до 3 попыток на пакет — первая и два повтора, с паузами 2 и 4 с перед повторами. Ошибки 401 и 403 не повторяются.
 - Повторный запуск: дубли недопустимы. Неизменённые фрагменты не отправляются в API и не перезаписываются. Повторный запуск без изменений корпуса делает 0 вызовов API и 0 изменений в базе.
 - SQL только с параметрами, без склейки строк.
 
@@ -133,7 +133,7 @@ ON CONFLICT (version) DO NOTHING;
 | Пустой файл или нет ни одного заголовка `###` | Документ пропускается, ошибка в отчёте |
 | `###` встречается до первого `##` | Документ пропускается, ошибка в отчёте |
 | API недоступен, таймаут, 429, 5xx | До 3 повторов (раздел 6); если не помогло — документ пропускается, в базе по нему ничего не меняется, ошибка в отчёте, переход к следующему документу |
-| API ответил 401 или 403 | Без повторов. Работа останавливается: дальше будет та же ошибка. Код выхода 1, в отчёте — какие документы не обработаны |
+| API ответил 401 или 403 | Без повторов. Работа останавливается: дальше будет та же ошибка. `stopped = True`, код выхода 1. Текущий документ и все необработанные считаются в `docs_failed`; в `errors` — строка по текущему документу и одна строка со списком необработанных файлов |
 | Вектор не длины 2048 или число векторов не совпадает с числом текстов | Документ пропускается, в базе по нему ничего не меняется, ошибка в отчёте |
 | База недоступна при старте | Ошибка до начала работы, код выхода 2 |
 | Ошибка базы при записи документа | Откат транзакции документа, ошибка в отчёте, переход к следующему |
@@ -206,13 +206,13 @@ python -m src.rag.index data/clean --doc ps-06.004
 | `src.rag.chunking` | `split_document(text: str, embedding_model: str = "ai-sage/Giga-Embeddings-instruct-3B") -> list[Chunk]` | полный текст файла | фрагменты в порядке следования в документе: doc, затем для каждой ОТФ — otf и её tf | `CorpusFormatError`: все проверки шага 5 и раздела 7, относящиеся к разбору |
 | `src.rag.chunking` | `content_hash(text: str, embedding_model: str) -> str` | | sha256 hex | — |
 | `src.rag.chunking` | `MAX_CHUNK_CHARS` | константа `int` = 12000 | | |
-| `src.rag.embeddings` | `EmbeddingError` | наследник `Exception`; атрибут `retryable: bool` | — | — |
+| `src.rag.embeddings` | `EmbeddingError` | наследник `Exception`; конструктор `EmbeddingError(message: str, retryable: bool = True)`; атрибут `retryable: bool` | — | — |
 | `src.rag.embeddings` | `embed_with_retry(embed: Callable[[list[str]], list[list[float]]], texts: list[str], max_retries: int = 3, sleep: Callable[[float], None] = time.sleep) -> list[list[float]]` | | векторы в том же порядке | `EmbeddingError` после исчерпания попыток или сразу при `retryable=False` |
 | `src.rag.embeddings` | `make_embedder(model: str = "ai-sage/Giga-Embeddings-instruct-3B", timeout: float = 60) -> Callable[[list[str]], list[list[float]]]` | читает `.env` (`CLOUDRU_API_KEY`, `CLOUDRU_FM_BASE_URL`) | функция embed для одного пакета | `EmbeddingError` при ошибках API: `retryable=True` для `APIConnectionError`, `APITimeoutError`, `RateLimitError`, `InternalServerError`; `False` для `AuthenticationError`, `PermissionDeniedError` и прочих ошибок 4xx |
 | `src.rag.store` | `ChunkStore` | `typing.Protocol` с методами `get_hashes(doc_id: str) -> dict[str, str]` (chunk_id → content_hash) и `apply(doc_id: str, upserts: list[tuple[Chunk, list[float]]], delete_ids: list[str]) -> None` (атомарно для документа) | — | любое исключение из `apply` означает, что по документу ничего не изменено |
 | `src.rag.store` | `PgChunkStore(conn)` | `conn` — соединение `psycopg` | реализация `ChunkStore` | |
-| `src.rag.index` | `IndexReport` | `@dataclass`, поля: `docs_total: int`, `docs_ok: int`, `docs_failed: int`, `chunks_total: int`, `inserted: int`, `updated: int`, `unchanged: int`, `deleted: int`, `errors: list[str]`, `stopped: bool` (остановлено из-за 401/403) | — | — |
-| `src.rag.index` | `index_corpus(clean_dir: Path, embed: Callable[[list[str]], list[list[float]]] \| None, store: ChunkStore \| None, *, doc_id: str \| None = None, dry_run: bool = False, batch_size: int = 16, sleep: Callable[[float], None] = time.sleep) -> IndexReport` | при `dry_run=True` `embed` и `store` не вызываются и могут быть `None` | отчёт | ошибки по документам в `errors`, не исключениями |
+| `src.rag.index` | `IndexReport` | `@dataclass`; каждая строка `errors` начинается с имени файла документа (`ps-06.004.md: …`), кроме итоговой строки об остановке; поля: `docs_total: int`, `docs_ok: int`, `docs_failed: int`, `chunks_total: int`, `inserted: int`, `updated: int`, `unchanged: int`, `deleted: int`, `errors: list[str]`, `stopped: bool` (остановлено из-за 401/403) | — | — |
+| `src.rag.index` | `index_corpus(clean_dir: Path, embed: Callable[[list[str]], list[list[float]]] \| None, store: ChunkStore \| None, *, doc_id: str \| None = None, dry_run: bool = False, batch_size: int = 16, sleep: Callable[[float], None] = time.sleep) -> IndexReport` | при `dry_run=True` `embed` и `store` не вызываются и могут быть `None`. Проверка `doc_id` против имени файла выполняется здесь (`split_document` путь не получает) | отчёт | ошибки по документам в `errors`, не исключениями |
 | `src.rag.index` | `main(argv: list[str] \| None = None) -> int` | аргументы командной строки | код выхода 0 / 1 / 2 | |
 | `src.rag.index` | `EMBEDDING_DIM` | константа `int` = 2048 | | |
 
@@ -235,3 +235,4 @@ python -m src.rag.index data/clean --doc ps-06.004
 | --- | --- | --- |
 | 1 | 20.11.2026 | Первая версия; открытые вопросы 1–5 закрыты владельцем задачи, спецификация утверждена |
 | 2 | 20.11.2026 | Эмбеддинги переведены с GigaChat API на Evolution Foundation Models (cloud.ru): с 01.09.2026 пакеты токенов в Studio покупают только клиенты, покупавшие их раньше. Модель `ai-sage/Giga-Embeddings-instruct-3B` (вектор 2048, окно 8К), библиотека `openai` вместо `gigachat`, ключ `CLOUDRU_API_KEY`, `make_gigachat_embedder` → `make_embedder`. Стоимость полной индексации около 10 ₽ вместо пакета 700 ₽. Длина вектора 2048 подтверждена проверочным запросом (вопрос 6). Версия 2 утверждена |
+| 3 | 20.11.2026 | Уточнения по вопросам тестировщика, поведение не меняется: повторы — 3 попытки всего, паузы 2 и 4 с (было «2, 4, 8»); заголовок otf/tf входит в текст с маркером `##`/`###`; в `--dry-run` счётчики изменений равны 0; при 401/403 необработанные документы в `docs_failed`; конструктор `EmbeddingError(message, retryable=True)`; строки `errors` начинаются с имени файла; проверка `doc_id` против имени файла — в `index_corpus`; `tf_codes: []` — пустое поле. Версия 3 утверждена |
